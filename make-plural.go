@@ -111,7 +111,10 @@ func (x Op) conditions() []string {
 			ub, _ := strconv.Atoi(upper_bound)
 
 			r := rangeCondition(x.left, lb, ub, x.operator)
-			result = append(result, r...)
+			if x.left[0] == 'n' {
+				r = "p && " + r
+			}
+			result = append(result, r)
 		} else {
 			result = append(result, fmt.Sprintf("%s %s %s", x.left, x.operator, condition))
 		}
@@ -154,15 +157,6 @@ func get(url, key string, headers *string) (map[string]map[string]string, error)
 		*headers += fmt.Sprintf("// %s\n", version["_number"])
 	}
 
-	{
-		var generation map[string]string
-		err = json.Unmarshal(document["supplemental"]["generation"], &generation)
-		if nil != err {
-			return nil, err
-		}
-		*headers += fmt.Sprintf("// %s\n", generation["_date"])
-	}
-
 	var data map[string]map[string]string
 	err = json.Unmarshal(document["supplemental"]["plurals-type-"+key], &data)
 	if nil != err {
@@ -171,12 +165,11 @@ func get(url, key string, headers *string) (map[string]map[string]string, error)
 	return data, nil
 }
 
-func rangeCondition(varname string, lower, upper int, operator string) []string {
-	var result []string
-	for i := lower; i <= upper; i++ {
-		result = append(result, fmt.Sprintf("%s %s %d", varname, operator, i))
+func rangeCondition(varname string, lower, upper int, operator string) string {
+	if operator == "!=" {
+		return fmt.Sprintf("(%s < %d || %s > %d)", varname, lower, varname, upper)
 	}
-	return result
+	return fmt.Sprintf("%s >= %d && %s <= %d", varname, lower, varname, upper)
 }
 
 func pattern2code(input string, ptr_vars *[]string) []string {
@@ -232,7 +225,7 @@ loop:
 		if "==" == ops[0].operator {
 			return conditions
 		} else {
-			return []string{strings.Join(conditions, " && ")}
+			return []string{joinAnd(conditions)}
 		}
 	}
 
@@ -247,7 +240,7 @@ loop:
 		operator := o.operator
 
 		if "OR" == logic && buffer_length > 0 {
-			result = append(result, strings.Join(buffer, ", "))
+			result = append(result, strings.Join(buffer, " || "))
 			buffer = []string{}
 			buffer_length = 0
 		}
@@ -256,20 +249,20 @@ loop:
 			if "==" == operator {
 				buffer = append(buffer, conditions...)
 			} else {
-				buffer = append(buffer, strings.Join(conditions, " && "))
+				buffer = append(buffer, joinAnd(conditions))
 			}
 			buffer_length = len(buffer)
 		} else if "AND" == logic && ("AND" == nextLogic || "" == nextLogic) {
 			if "==" == operator {
-				buffer[buffer_length-1] += " && " + joinOr(conditions)
+				joinTo(buffer, buffer_length-1, joinOr(conditions))
 			} else {
-				buffer[buffer_length-1] += " && " + strings.Join(conditions, " && ")
+				joinTo(buffer, buffer_length-1, joinAnd(conditions))
 			}
 		} else if "" == logic && "AND" == nextLogic {
 			if "==" == operator {
 				buffer = append(buffer, joinOr(conditions))
 			} else {
-				buffer = append(buffer, strings.Join(conditions, " && "))
+				buffer = append(buffer, joinAnd(conditions))
 			}
 			buffer_length = len(buffer)
 		} else if "OR" == logic && "AND" == nextLogic {
@@ -280,26 +273,51 @@ loop:
 					buffer = append(buffer, conditions...)
 				}
 			} else {
-				buffer = append(buffer, strings.Join(conditions, " && "))
+				buffer = append(buffer, joinAnd(conditions))
 			}
 			buffer_length = len(buffer)
 		} else if "AND" == logic && "OR" == nextLogic {
 			if "==" == operator {
-				buffer[buffer_length-1] += " && " + joinOr(conditions)
+				joinTo(buffer, buffer_length-1, joinOr(conditions))
 			} else {
-				buffer[buffer_length-1] += " && " + strings.Join(conditions, " && ")
+				joinTo(buffer, buffer_length-1, joinAnd(conditions))
 			}
 		}
 	}
 
 	if len(buffer) > 0 {
 		if "OR" == logic {
-			result = append(result, buffer...)
+			result = append(result, strings.Join(buffer, " || "))
 		} else {
-			result = append(result, strings.Join(buffer, " && "))
+			result = append(result, joinAnd(buffer))
 		}
 	}
 	return result
+}
+
+func joinTo(data []string, idx int, toAppend string) {
+	p := strings.HasPrefix(toAppend, "p && ")
+	toAppend = strings.TrimPrefix(toAppend, "p && ")
+	if !strings.HasPrefix(data[idx], "p && ") && p {
+		data[idx] = "p && " + data[idx]
+	}
+	data[idx] += " && " + toAppend
+}
+
+func joinAnd(data []string) string {
+	return strings.Join(cleanAnd(data), " && ")
+}
+
+func cleanAnd(data []string) []string {
+	p := false
+	for i, s := range data {
+		p = p || strings.HasPrefix(s, "p && ")
+		data[i] = strings.TrimPrefix(s, "p && ")
+	}
+	if p {
+		data[0] = "p && " + data[0]
+	}
+	return data
 }
 
 func joinOr(data []string) string {
@@ -309,7 +327,7 @@ func joinOr(data []string) string {
 	return data[0]
 }
 
-func rule2code(key string, data map[string]string, ptr_vars *[]string, padding string) string {
+func rule2code(key string, data map[string]string, ptr_vars *[]string, padding string, one_cases map[string][]string) string {
 	if input, ok := data["pluralRule-count-"+key]; ok {
 		result := ""
 
@@ -320,7 +338,8 @@ func rule2code(key string, data map[string]string, ptr_vars *[]string, padding s
 			result += padding + "default:\n"
 		} else {
 			cases := pattern2code(input, ptr_vars)
-			result += "\n" + padding + "case " + strings.Join(cases, ", ") + ":\n"
+			one_cases[key] = cases
+			result += "\n" + padding + "case " + strings.Join(cases, " || ") + ":\n"
 		}
 		result += padding + "\treturn \"" + key + "\"\n"
 		return result
@@ -328,17 +347,17 @@ func rule2code(key string, data map[string]string, ptr_vars *[]string, padding s
 	return ""
 }
 
-func map2code(data map[string]string, ptr_vars *[]string, padding string) string {
+func map2code(data map[string]string, ptr_vars *[]string, padding string, one_cases map[string][]string) string {
 	if 1 == len(data) {
-		return rule2code("other", data, ptr_vars, padding)
+		return rule2code("other", data, ptr_vars, padding, one_cases)
 	}
 	result := padding + "switch {\n"
-	result += rule2code("other", data, ptr_vars, padding)
-	result += rule2code("zero", data, ptr_vars, padding)
-	result += rule2code("one", data, ptr_vars, padding)
-	result += rule2code("two", data, ptr_vars, padding)
-	result += rule2code("few", data, ptr_vars, padding)
-	result += rule2code("many", data, ptr_vars, padding)
+	result += rule2code("other", data, ptr_vars, padding, one_cases)
+	result += rule2code("zero", data, ptr_vars, padding, one_cases)
+	result += rule2code("one", data, ptr_vars, padding, one_cases)
+	result += rule2code("two", data, ptr_vars, padding, one_cases)
+	result += rule2code("few", data, ptr_vars, padding, one_cases)
+	result += rule2code("many", data, ptr_vars, padding, one_cases)
 	result += padding + "}\n"
 	return result
 }
@@ -402,19 +421,33 @@ func map2test(ordinals, plurals map[string]string) []Test {
 	return result
 }
 
-func culture2code(ordinals, plurals map[string]string, padding string) (string, string, []Test) {
+func culture2code(ordinals, plurals map[string]string, padding string, ordinal_cases, plural_cases map[string][]string) (string, string, []Test) {
 	var code string
 	var vars []string
 
 	if nil == ordinals {
-		code = map2code(plurals, &vars, padding)
+		code = map2code(plurals, &vars, padding, plural_cases)
 	} else {
 		code = padding + "if ordinal {\n"
-		code += map2code(ordinals, &vars, padding+"\t")
+		code += map2code(ordinals, &vars, padding+"\t", ordinal_cases)
 		code += padding + "}\n\n"
-		code += map2code(plurals, &vars, padding)
+		code += map2code(plurals, &vars, padding, plural_cases)
 	}
 	tests := map2test(ordinals, plurals)
+
+	needN := false
+	if strings.Contains(code, "p") {
+		if varname('w', vars) != "_" {
+			addVar("p", "w == 0", &vars)
+		} else {
+			needN = true
+			if varname('i', vars) != "_" {
+				addVar("p", "float64(i) == n", &vars)
+			} else {
+				addVar("p", "float64(int64(n)) == n", &vars)
+			}
+		}
+	}
 
 	str_vars := ""
 	max := len(vars)
@@ -435,6 +468,10 @@ func culture2code(ordinals, plurals map[string]string, padding string) (string, 
 		var_v := varname('v', vars)
 		var_t := varname('t', vars)
 		var_w := varname('w', vars)
+
+		if needN {
+			var_n = "n"
+		}
 
 		if "_" != var_f || "_" != var_v || "_" != var_t || "_" != var_w {
 			str_vars += padding + fmt.Sprintf("%s, %s, %s, %s, %s, %s := finvtw(value)\n", var_f, var_i, var_n, var_v, var_t, var_w)
@@ -531,6 +568,8 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 	var items []Source
 	var tests []Source
 
+	ordinals_cases := make(map[string]map[string][]string, len(cultures))
+	plurals_cases := make(map[string]map[string][]string, len(cultures))
 	for _, culture := range cultures {
 		fmt.Print(culture)
 
@@ -549,7 +588,15 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 				}
 			}
 
-			vars, code, unit_tests := culture2code(ordinals, plurals, "\t\t")
+			ordinal_cases := make(map[string][]string, 5)
+			plural_cases := make(map[string][]string, 5)
+			vars, code, unit_tests := culture2code(ordinals, plurals, "\t\t", ordinal_cases, plural_cases)
+			if len(ordinal_cases) != 0 {
+				ordinals_cases[culture] = ordinal_cases
+			}
+			if len(plural_cases) != 0 {
+				plurals_cases[culture] = plural_cases
+			}
 			items = append(items, FuncSource{culture, vars, code})
 
 			fmt.Println(" \u2713")
@@ -560,6 +607,11 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 		}
 	}
 
+	err := createPluralsCases("plural/plurals_cases.go", headers, ordinals_cases, plurals_cases)
+	if err != nil {
+		return err
+	}
+
 	if len(tests) > 0 {
 		err := createSource("plural_test.tmpl", "plural/func_test.go", headers, tests)
 		if nil != err {
@@ -567,6 +619,25 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 		}
 	}
 	return createSource("plural.tmpl", "plural/func.go", headers, items)
+}
+
+func createPluralsCases(dest_filepath, headers string, ordinal_cases, plurals_cases map[string]map[string][]string) error {
+	const tplStr = `// Generated by https://github.com/gotnospirit/makeplural
+// at %v
+%s
+package plural
+
+var OrdinalsCases = %#v
+var PluralsCases = %#v
+`
+	file, err := os.Create(dest_filepath)
+	if nil != err {
+		return err
+	}
+	defer file.Close()
+
+	_, err = fmt.Fprintf(file, tplStr, time.Now(), headers, ordinal_cases, plurals_cases)
+	return err
 }
 
 func createSource(tmpl_filepath, dest_filepath, headers string, items []Source) error {
@@ -594,6 +665,9 @@ func createSource(tmpl_filepath, dest_filepath, headers string, items []Source) 
 
 var user_culture = flag.String("culture", "*", "Culture subset")
 
+// TODO dont know howto really fix it
+var fixOrdinalsKwTwo = "n % 100 = 2,22,42,62,82 @integer 2, 22, 42, 62, 82, 102, 122, 142, 1002, … @decimal 2.0, 22.0, 42.0, 62.0, 82.0, 102.0, 122.0, 142.0, 1002.0, …"
+
 func main() {
 	flag.Parse()
 
@@ -611,6 +685,7 @@ func main() {
 			fmt.Println(" \u2717")
 			fmt.Println(err)
 		} else {
+			plurals["kw"]["pluralRule-count-two"] = fixOrdinalsKwTwo
 			fmt.Println(" \u2713")
 
 			err = createGoFiles(headers, &plurals, &ordinals)
