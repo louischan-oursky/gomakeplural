@@ -3,6 +3,7 @@ package cases
 import "strconv"
 
 type Culture struct {
+	Name string
 	// Symbols plus P
 	F, I, N, V, T, W, P Symbol
 
