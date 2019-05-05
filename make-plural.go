@@ -368,13 +368,13 @@ func rule2code(key string, data map[string]string, padding string, culture *case
 			}
 			result += "default:\n"
 		} else {
-			cases := strings.Join(pattern2code(input, culture), " || ")
+			cond := strings.Join(pattern2code(input, culture), " || ")
 			if ordinal {
-				culture.Ordinal[key] = cases
+				culture.Ordinal = append(culture.Ordinal, cases.Case{Form: key, Cond: cond})
 			} else {
-				culture.Cardinal[key] = cases
+				culture.Cardinal = append(culture.Cardinal, cases.Case{Form: key, Cond: cond})
 			}
-			result += "\n" + "case " + cases + ":\n"
+			result += "\n" + "case " + cond + ":\n"
 		}
 		result += "\treturn \"" + key + "\"\n"
 		return result
@@ -658,8 +658,8 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 
 		data := cases.Culture{
 			Name:     culture,
-			Cardinal: make(map[string]string, 5),
-			Ordinal:  make(map[string]string, 5),
+			Cardinal: make(cases.Cases, 0, 5),
+			Ordinal:  make(cases.Cases, 0, 5),
 			Vars:     make([]cases.Var, 0, 8),
 		}
 		vars, code := culture2code(ordinals, plurals, "\t\t", &data)

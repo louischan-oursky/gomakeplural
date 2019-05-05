@@ -4,20 +4,21 @@ import "strconv"
 
 type Culture struct {
 	Name string
+
 	// Symbols plus P
 	F, I, N, V, T, W, P Symbol
 
 	// Cardinal defines the plural rules for numbers indicating quantities.
-	Cardinal map[string]string
+	Cardinal Cases
 
 	// Ordinal defines the plural rules for numbers indicating position
 	// (first, second, etc.).
-	Ordinal map[string]string
-
-	Tests UnitTests
+	Ordinal Cases
 
 	// Vars only come from mod
 	Vars []Var
+
+	Tests UnitTests
 }
 
 func (c Culture) HasVars() bool {
@@ -52,6 +53,21 @@ func (s Symbol) Name() string { return string(s) }
 // 	t  visible fractional digits in n, without trailing zeros.
 //  p := w == 0
 const U, F, I, N, V, T, W, P Symbol = 0, 'f', 'i', 'n', 'v', 't', 'w', 'p'
+
+type Case struct {
+	Form string
+	Cond string
+}
+
+type Cases []Case
+
+func (s Cases) ToMap() (m map[string]*Case) {
+	m = make(map[string]*Case, len(s))
+	for i := range s {
+		m[s[i].Form] = &s[i]
+	}
+	return
+}
 
 type Var struct {
 	Symbol Symbol
