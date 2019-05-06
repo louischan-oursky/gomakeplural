@@ -10,14 +10,15 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"text/template"
 	"time"
 
-	"github.com/empirefox/makeplural/cases"
+	"github.com/Masterminds/sprig"
+	"github.com/empirefox/makeplural/plural"
+	"golang.org/x/text/language"
 )
 
 type (
@@ -83,13 +84,13 @@ func (x UnitTestSource) Code() string {
 	return strings.Join(result, "\n")
 }
 
-func NewTestSource(name string, culture *cases.Culture) UnitTestSource {
+func NewTestSource(name string, culture *plural.Culture) UnitTestSource {
 	tests1 := NewTests(culture.Tests.Cardinal, false)
 	tests2 := NewTests(culture.Tests.Ordinal, true)
 	return UnitTestSource{name, append(tests1, tests2...)}
 }
 
-func NewTests(uts []cases.UnitTest, ordinal bool) []Test {
+func NewTests(uts []plural.UnitTest, ordinal bool) []Test {
 	length := 0
 	for i := range uts {
 		length += len(uts[i].Integers)
@@ -128,7 +129,7 @@ func sanitize(input string) string {
 	return result
 }
 
-func (x Op) conditions(culture *cases.Culture) []string {
+func (x Op) conditions(culture *plural.Culture) []string {
 	var result []string
 
 	conditions := strings.Split(x.right, ",")
@@ -142,7 +143,7 @@ func (x Op) conditions(culture *cases.Culture) []string {
 
 			r := rangeCondition(x.left, lb, ub, x.operator)
 			if x.left[0] == 'n' {
-				culture.P = cases.P
+				culture.P = plural.P
 				r = "p && " + r
 			}
 			result = append(result, r)
@@ -203,7 +204,7 @@ func rangeCondition(varname string, lower, upper int, operator string) string {
 	return fmt.Sprintf("%s >= %d && %s <= %d", varname, lower, varname, upper)
 }
 
-func pattern2code(input string, culture *cases.Culture) []string {
+func pattern2code(input string, culture *plural.Culture) []string {
 	left, short, operator, logic := "", "", "", ""
 
 	var ops []Op
@@ -358,7 +359,7 @@ func joinOr(data []string) string {
 	return data[0]
 }
 
-func rule2code(key string, data map[string]string, padding string, culture *cases.Culture, ordinal bool) string {
+func rule2code(key string, data map[string]string, padding string, culture *plural.Culture, ordinal bool) string {
 	if input, ok := data["pluralRule-count-"+key]; ok {
 		result := ""
 
@@ -370,9 +371,9 @@ func rule2code(key string, data map[string]string, padding string, culture *case
 		} else {
 			cond := strings.Join(pattern2code(input, culture), " || ")
 			if ordinal {
-				culture.Ordinal = append(culture.Ordinal, cases.Case{Form: key, Cond: cond})
+				culture.Ordinal = append(culture.Ordinal, plural.Case{Form: key, Cond: cond})
 			} else {
-				culture.Cardinal = append(culture.Cardinal, cases.Case{Form: key, Cond: cond})
+				culture.Cardinal = append(culture.Cardinal, plural.Case{Form: key, Cond: cond})
 			}
 			result += "\n" + "case " + cond + ":\n"
 		}
@@ -382,7 +383,7 @@ func rule2code(key string, data map[string]string, padding string, culture *case
 	return ""
 }
 
-func map2code(data map[string]string, padding string, culture *cases.Culture, ordinal bool) string {
+func map2code(data map[string]string, padding string, culture *plural.Culture, ordinal bool) string {
 	if 1 == len(data) {
 		return rule2code("other", data, padding, culture, ordinal)
 	}
@@ -422,8 +423,8 @@ func splitValues(input string) []string {
 	return result
 }
 
-func pattern2test(expected, input string, culture *cases.Culture, ordinal bool) {
-	ut := cases.UnitTest{Expected: expected}
+func pattern2test(expected, input string, culture *plural.Culture, ordinal bool) {
+	ut := plural.UnitTest{Expected: expected}
 	patterns := strings.Split(input, "@")
 	for _, pattern := range patterns {
 		if strings.HasPrefix(pattern, "integer") {
@@ -439,7 +440,7 @@ func pattern2test(expected, input string, culture *cases.Culture, ordinal bool) 
 	}
 }
 
-func map2test(ordinals, plurals map[string]string, culture *cases.Culture) {
+func map2test(ordinals, plurals map[string]string, culture *plural.Culture) {
 	for _, rule := range []string{"one", "two", "few", "many", "zero", "other"} {
 		if input, ok := ordinals["pluralRule-count-"+rule]; ok {
 			pattern2test(rule, input, culture, true)
@@ -451,7 +452,7 @@ func map2test(ordinals, plurals map[string]string, culture *cases.Culture) {
 	}
 }
 
-func culture2code(ordinals, plurals map[string]string, padding string, culture *cases.Culture) (string, string) {
+func culture2code(ordinals, plurals map[string]string, padding string, culture *plural.Culture) (string, string) {
 	var code string
 
 	if nil == ordinals {
@@ -477,12 +478,12 @@ func culture2code(ordinals, plurals map[string]string, padding string, culture *
 		// f	    visible fractional digits in n, with trailing zeros.
 		// t	    visible fractional digits in n, without trailing zeros.
 		if culture.P.Use() && !culture.W.Use() {
-			culture.N = cases.N
+			culture.N = plural.N
 		}
 
 		if culture.F.Use() || culture.V.Use() || culture.T.Use() || culture.W.Use() {
 			if culture.P.Use() {
-				culture.W = cases.W
+				culture.W = plural.W
 			}
 			str_vars += fmt.Sprintf("%s, %s, %s, %s, %s, %s := finvtw(value)\n",
 				getSymbolName(culture.F),
@@ -525,8 +526,8 @@ func culture2code(ordinals, plurals map[string]string, padding string, culture *
 	return str_vars, code
 }
 
-func toVar(expr string, culture *cases.Culture) string {
-	var v cases.Var
+func toVar(expr string, culture *plural.Culture) string {
+	var v plural.Var
 	if pos := strings.Index(expr, "%"); -1 != pos {
 		k, m := expr[:pos], expr[pos+1:]
 		if len(k) != 1 {
@@ -536,7 +537,7 @@ func toVar(expr string, culture *cases.Culture) string {
 		if err != nil {
 			log.Fatalf("mod err:\n", expr)
 		}
-		v = cases.Var{Symbol: setSymbol(k[0], culture), Mod: mod}
+		v = plural.Var{Symbol: setSymbol(k[0], culture), Mod: mod}
 	} else {
 		if len(expr) != 1 {
 			log.Fatalln("symbol length err:", expr)
@@ -564,59 +565,59 @@ var symbols = map[byte]bool{
 	'p': true,
 }
 
-func toSymbol(s byte) cases.Symbol {
+func toSymbol(s byte) plural.Symbol {
 	if !symbols[s] {
 		log.Fatalf("toSymbol err: %s, %d\n", s, s)
 	}
-	return cases.Symbol(s)
+	return plural.Symbol(s)
 }
 
-func setSymbol(s byte, culture *cases.Culture) cases.Symbol {
+func setSymbol(s byte, culture *plural.Culture) plural.Symbol {
 	b := toSymbol(s)
 	switch b {
-	case cases.F:
+	case plural.F:
 		culture.F = b
-	case cases.I:
+	case plural.I:
 		culture.I = b
-	case cases.N:
+	case plural.N:
 		culture.N = b
-	case cases.V:
+	case plural.V:
 		culture.V = b
-	case cases.T:
+	case plural.T:
 		culture.T = b
-	case cases.W:
+	case plural.W:
 		culture.W = b
-	case cases.P:
+	case plural.P:
 		culture.P = b
 	}
 	return b
 }
 
-func getSymbolName(s cases.Symbol) string {
+func getSymbolName(s plural.Symbol) string {
 	if s.Use() {
 		return toSymbol(byte(s)).Name()
 	}
 	return "_"
 }
 
-func toVarExpr(v cases.Var) string {
+func toVarExpr(v plural.Var) string {
 	if v.Symbol == 'n' {
 		return fmt.Sprintf("mod(n, %d)", v.Mod)
 	}
 	return string(v.Symbol) + " % " + strconv.Itoa(v.Mod)
 }
 
-func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[string]string) error {
+func createGoFiles(headers string, allPlurals, allOrdinals map[string]map[string]string) error {
 	var cultures []string
 	if "*" == *user_culture {
-		for culture, _ := range *ptr_plurals {
+		for culture, _ := range allPlurals {
 			cultures = append(cultures, culture)
 		}
 	} else {
 		for _, culture := range strings.Split(*user_culture, ",") {
 			culture = strings.TrimSpace(culture)
 
-			if _, ok := (*ptr_plurals)[culture]; !ok {
+			if _, ok := allPlurals[culture]; !ok {
 				return fmt.Errorf("Aborted, `%s` not found...", culture)
 			}
 			cultures = append(cultures, culture)
@@ -631,12 +632,12 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 	var items []Source
 	var tests []Source
 
-	datas := make([]cases.Culture, 0, len(cultures))
-	others := make([]string, 0, len(cultures))
+	datas := make([]*plural.Culture, 0, len(cultures))
+	others := make([]language.Tag, 0, len(cultures))
 	for _, culture := range cultures {
 		log.Print(culture)
 
-		plurals := (*ptr_plurals)[culture]
+		plurals := allPlurals[culture]
 
 		if nil == plurals {
 			log.Println(" \u2717 - Plural not defined")
@@ -648,7 +649,7 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 			continue
 		}
 
-		ordinals := (*ptr_ordinals)[culture]
+		ordinals := allOrdinals[culture]
 		if nil != ordinals {
 			if _, ok := ordinals["pluralRule-count-other"]; !ok {
 				log.Println(" \u2717 - Ordinal missing the mandatory `other` choice...")
@@ -656,11 +657,12 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 			}
 		}
 
-		data := cases.Culture{
-			Name:     culture,
-			Cardinal: make(cases.Cases, 0, 5),
-			Ordinal:  make(cases.Cases, 0, 5),
-			Vars:     make([]cases.Var, 0, 8),
+		t := language.MustParse(culture)
+		data := plural.Culture{
+			Name:     t,
+			Cardinal: make(plural.Cases, 0, 5),
+			Ordinal:  make(plural.Cases, 0, 5),
+			Vars:     make([]plural.Var, 0, 8),
 		}
 		vars, code := culture2code(ordinals, plurals, "\t\t", &data)
 		if len(data.Cardinal) == 0 {
@@ -670,9 +672,9 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 			data.Ordinal = nil
 		}
 		if data.Cardinal != nil || data.Ordinal != nil {
-			datas = append(datas, data)
+			datas = append(datas, &data)
 		} else {
-			others = append(others, culture)
+			others = append(others, t)
 		}
 		items = append(items, FuncSource{culture, vars, code})
 
@@ -683,7 +685,11 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 		}
 	}
 
-	err := createPluralsCases("plural/cultures.go", headers, datas, others)
+	err := createPluralsData("plural/cultures.go", &culturesTplData{
+		Headers:  headers,
+		Cultures: datas,
+		Others:   others,
+	})
 	if err != nil {
 		return err
 	}
@@ -697,80 +703,95 @@ func createGoFiles(headers string, ptr_plurals, ptr_ordinals *map[string]map[str
 	return createSource("plural.tmpl", "plural/func.go", headers, items)
 }
 
-var (
-	breakLineBuf          = make([]byte, 64)
-	breakBraceStartIgnore = []byte("string{")
-	// brace start: ([\w]+\{) add line at end
-	// comma end: (,\s[\w]{2,}) add line after comma
-	// brace end(with map-key start): ([^"]\}+(,\s")?)
-	//   add line after every brace and before map-key start
-	breakLineReg = regexp.MustCompile(`([\w]+\{)|(,\s[\w]{2,})|([^"]\}+(,\s")?)`)
-)
-
-// breakLines leaves all string slice and FINVTWP as one line
-func breakLines(b []byte) []byte {
-	b = breakLineReg.ReplaceAllFunc(b, func(s []byte) []byte {
-		l := len(s)
-		// comma end
-		if s[0] == ',' {
-			s[1] = '\n'
-			return s
-		}
-
-		// brace start
-		if s[l-1] == '{' {
-			if bytes.Equal(s, breakBraceStartIgnore) {
-				return s
-			}
-			copy(breakLineBuf, s)
-			breakLineBuf[l] = '\n'
-			return breakLineBuf[:l+1]
-		}
-
-		// brace end
-		cur := 0
-		for i, u := range s {
-			cur = i * 3
-			if s[i] == ',' {
-				// map-value \n map-key
-				// already added ',\n', so add last '"' here
-				breakLineBuf[cur] = '"'
-				break
-			}
-			breakLineBuf[cur] = u
-			if i != l-1 {
-				breakLineBuf[cur+1] = ','
-				breakLineBuf[cur+2] = '\n'
-			}
-		}
-
-		return breakLineBuf[:cur+1]
-	})
-	return b
-}
-
-func createPluralsCases(dest_filepath, headers string, datas []cases.Culture, others []string) error {
-	const tplStr = `// Generated by https://github.com/empirefox/makeplural
-// at %v
-%s
+const culturesTplStr = `// Generated by https://github.com/empirefox/makeplural
+// at {{ now.UTC | printf "%v" }}
+{{ .Headers }}
 package plural
 
 import(
-	"github.com/empirefox/makeplural/cases"
+	"golang.org/x/text/language"
 )
 
-var Cultures = %#v
+var Cultures = []Culture{
+	{{- range .Cultures }}
+	{{ template "culture" . }},
+	{{- end }}
+}
 
-var Others = %#v
+var Others = []language.Tag{
+	{{- range .Others }}
+	language.MustParse("{{ .String }}"),
+	{{- end }}
+}
 `
 
-	file, err := createSourceFile(dest_filepath, breakLines)
+const cultureTplStr = `{
+	Name: language.MustParse("{{ .Name.String }}"),
+	{{ range . | symbols }} {{ if . }}{{.String}}:{{.String}},{{ end }} {{ end }}
+	{{ if .Cardinal }} Cardinal: {{ template "cases" .Cardinal }}, {{ end }}
+	{{ if .Ordinal }} Ordinal: {{ template "cases" .Ordinal }}, {{ end }}
+	{{ if .Vars }} Vars: {{ template "vars" .Vars }}, {{ end }}
+	{{ if .Tests }} Tests: {{ template "tests" .Tests }}, {{ end }}
+}`
+
+const casesTplStr = `Cases{
+	{{- range . }}
+	{ Form: "{{ .Form }}", Cond: "{{ .Cond }}" },
+	{{- end }}
+}`
+
+const varsTplStr = `[]Var{
+	{{- range . }}
+	{ Symbol: {{ .Symbol.String }}, Mod: {{ .Mod }} },
+	{{- end }}
+}`
+
+const testsTplStr = `UnitTests{
+	{{ if .Cardinal }} Cardinal: {{ template "testCases" .Cardinal }}, {{ end }}
+	{{ if .Ordinal }} Ordinal: {{ template "testCases" .Ordinal }}, {{ end }}
+}`
+
+const testCasesTplStr = `[]UnitTest{
+	{{- range . }}
+	{
+		Expected: "{{ .Expected }}",
+		{{ if .Integers }} Integers: {{ .Integers | printf "%#v" }}, {{ end }}
+		{{ if .Decimals }} Decimals: {{ .Decimals | printf "%#v" }}, {{ end }}
+	},
+	{{- end }}
+}`
+
+func symbolsTplFunc(c *plural.Culture) []plural.Symbol {
+	return []plural.Symbol{c.F, c.I, c.N, c.V, c.T, c.W, c.P}
+}
+
+var culturesTpl = template.Must(template.New("cultures").
+	Funcs(sprig.TxtFuncMap()).
+	Funcs(template.FuncMap{"symbols": symbolsTplFunc}).
+	Parse(culturesTplStr))
+
+func init() {
+	template.Must(culturesTpl.New("culture").Parse(cultureTplStr))
+	template.Must(culturesTpl.New("cases").Parse(casesTplStr))
+	template.Must(culturesTpl.New("vars").Parse(varsTplStr))
+	template.Must(culturesTpl.New("tests").Parse(testsTplStr))
+	template.Must(culturesTpl.New("testCases").Parse(testCasesTplStr))
+}
+
+type culturesTplData struct {
+	Headers  string
+	Cultures []*plural.Culture
+	Others   []language.Tag
+}
+
+func createPluralsData(dest_filepath string, data *culturesTplData) error {
+	file, err := createSourceFile(dest_filepath)
 	if nil != err {
 		return err
 	}
 	defer file.Close()
 
-	_, err = fmt.Fprintf(file, tplStr, time.Now(), headers, datas, others)
+	err = culturesTpl.Execute(file, data)
 	if err != nil {
 		return err
 	}
@@ -826,11 +847,11 @@ func (sf *sourceFile) Save() error {
 			b = pre(b)
 		}
 	}
-	src, err := format.Source(b)
+	b, err := format.Source(b)
 	if err != nil {
 		return err
 	}
-	_, err = sf.f.Write(src)
+	_, err = sf.f.Write(b)
 	return err
 }
 func (sf *sourceFile) Close() error { return sf.f.Close() }
@@ -861,7 +882,7 @@ func main() {
 	plurals["kw"]["pluralRule-count-two"] = fixOrdinalsKwTwo
 	log.Println(" \u2713")
 
-	err = createGoFiles(headers, &plurals, &ordinals)
+	err = createGoFiles(headers, plurals, ordinals)
 	if nil != err {
 		log.Fatalln(err, "(╯°□°）╯︵ ┻━┻")
 	}

@@ -1,14 +1,14 @@
 package plural
 
 import (
-	"github.com/empirefox/makeplural/cases"
+	"golang.org/x/text/language"
 )
 
-var culturesMap map[string]*cases.Culture
+var culturesMap map[language.Tag]*Culture
 
-func CulturesMap() map[string]*cases.Culture {
+func CulturesMap() map[language.Tag]*Culture {
 	if culturesMap == nil {
-		culturesMap = make(map[string]*cases.Culture, len(Cultures))
+		culturesMap = make(map[language.Tag]*Culture, len(Cultures))
 		for i := range Cultures {
 			culturesMap[Cultures[i].Name] = &Cultures[i]
 		}
@@ -16,11 +16,11 @@ func CulturesMap() map[string]*cases.Culture {
 	return culturesMap
 }
 
-var othersMap map[string]bool
+var othersMap map[language.Tag]bool
 
-func IsOthers(cultrue string) bool {
+func IsOthers(cultrue language.Tag) bool {
 	if othersMap == nil {
-		othersMap = make(map[string]bool, len(Others))
+		othersMap = make(map[language.Tag]bool, len(Others))
 		for _, c := range Others {
 			othersMap[c] = true
 		}
