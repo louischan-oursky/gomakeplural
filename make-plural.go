@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Masterminds/sprig"
+	"github.com/elliotchance/pie/pie"
 	"github.com/empirefox/makeplural/plural"
 	"golang.org/x/text/language"
 )
@@ -607,6 +609,17 @@ func toVarExpr(v plural.Var) string {
 	return string(v.Symbol) + " % " + strconv.Itoa(v.Mod)
 }
 
+func isRuleParsed(culture string, in []string, allPlurals, allOrdinals map[string]map[string]string) (string, bool) {
+	plurals := allPlurals[culture]
+	ordinals := allOrdinals[culture]
+	for _, lang := range in {
+		if reflect.DeepEqual(plurals, allPlurals[lang]) && reflect.DeepEqual(ordinals, allOrdinals[lang]) {
+			return lang, true
+		}
+	}
+	return "", false
+}
+
 func createGoFiles(headers string, allPlurals, allOrdinals map[string]map[string]string) error {
 	var cultures []string
 	if "*" == *user_culture {
@@ -625,7 +638,7 @@ func createGoFiles(headers string, allPlurals, allOrdinals map[string]map[string
 	}
 	sort.Strings(cultures)
 
-	if 0 == len(cultures) {
+	if len(cultures) == 0 {
 		return fmt.Errorf("Not enough data to create source...")
 	}
 
@@ -633,85 +646,105 @@ func createGoFiles(headers string, allPlurals, allOrdinals map[string]map[string
 	var tests []Source
 
 	datas := make([]*plural.Culture, 0, len(cultures))
-	others := make([]language.Tag, 0, len(cultures))
-	culturesMap := make(map[language.Tag]bool, len(cultures))
+	others := make(pie.Strings, 0, len(cultures))
+	culturesMap := make(map[language.Tag]*plural.Culture, len(cultures))
 	othersMap := make(map[language.Tag]bool, len(cultures))
-	equalCultures := make([]string, 0, len(cultures))
-	equalOthers := make([]string, 0, len(cultures))
-	for _, culture := range cultures {
-		log.Print(culture)
-
+	for i, culture := range cultures {
 		t := language.MustParse(culture)
-		if culturesMap[t] {
-			equalCultures = append(equalCultures, culture)
+		log.Print(culture, "=>", t.String())
+
+		if data, ok := culturesMap[t]; ok {
+			data.Langs = append(data.Langs, culture)
+			if t.String() != culture {
+				data.Langs = append(data.Langs, t.String())
+			}
 			continue
 		}
 		if othersMap[t] {
-			equalOthers = append(equalOthers, culture)
+			others = others.Append(culture)
+			if t.String() != culture {
+				others = others.Append(t.String())
+			}
 			continue
 		}
 
-		plurals := allPlurals[culture]
-
-		if nil == plurals {
+		plurals, ok := allPlurals[culture]
+		if !ok {
 			log.Println(" \u2717 - Plural not defined")
 			continue
 		}
 
-		if _, ok := plurals["pluralRule-count-other"]; !ok {
+		if _, ok = plurals["pluralRule-count-other"]; !ok {
 			log.Println(" \u2717 - Plural missing mandatory `other` choice...")
 			continue
 		}
 
-		ordinals := allOrdinals[culture]
-		if nil != ordinals {
-			if _, ok := ordinals["pluralRule-count-other"]; !ok {
+		ordinals, ok := allOrdinals[culture]
+		if ok {
+			if _, ok = ordinals["pluralRule-count-other"]; !ok {
 				log.Println(" \u2717 - Ordinal missing the mandatory `other` choice...")
 				continue
 			}
 		}
 
+		var dataAdded bool
+		if exist, ok := isRuleParsed(culture, cultures[:i], allPlurals, allOrdinals); ok {
+			if data, ok := culturesMap[language.MustParse(exist)]; ok {
+				culturesMap[t] = data
+				data.Langs = append(data.Langs, culture)
+				if t.String() != culture {
+					data.Langs = append(data.Langs, t.String())
+				}
+			} else {
+				others = others.Append(culture)
+				if t.String() != culture {
+					others = others.Append(t.String())
+				}
+				othersMap[t] = true
+			}
+			dataAdded = true
+		}
+
 		data := plural.Culture{
-			Name:     t,
+			Langs:    []string{culture},
 			Cardinal: make(plural.Cases, 0, 5),
 			Ordinal:  make(plural.Cases, 0, 5),
 			Vars:     make([]plural.Var, 0, 8),
 		}
 		vars, code := culture2code(ordinals, plurals, "\t\t", &data)
-		if len(data.Cardinal) == 0 {
-			data.Cardinal = nil
-		}
-		if len(data.Ordinal) == 0 {
-			data.Ordinal = nil
-		}
-		if data.Cardinal != nil || data.Ordinal != nil {
-			datas = append(datas, &data)
-			culturesMap[t] = true
-			if t.String() != culture {
-				equalCultures = append(equalCultures, culture)
-			}
-		} else {
-			others = append(others, t)
-			othersMap[t] = true
-			if t.String() != culture {
-				equalOthers = append(equalOthers, culture)
+		if !dataAdded {
+			if data.HasCardinal() || data.HasOrdinal() {
+				datas = append(datas, &data)
+				if t.String() != culture {
+					data.Langs = append(data.Langs, t.String())
+				}
+				culturesMap[t] = &data
+			} else {
+				others = others.Append(culture)
+				if t.String() != culture {
+					others = others.Append(t.String())
+				}
+				othersMap[t] = true
 			}
 		}
 		items = append(items, FuncSource{t.String(), vars, code})
-
-		log.Println(" \u2713")
 
 		if data.HasTest() {
 			tests = append(tests, NewTestSource(t.String(), &data))
 		}
 	}
 
+	for _, data := range datas {
+		data.Langs = []string(pie.Strings(data.Langs).Unique().Sort())
+	}
+	others = others.Unique().Sort().Unselect(func(lang string) bool {
+		return lang == "und"
+	})
+
 	err := createPluralsData("plural/cultures.go", &culturesTplData{
-		Headers:       headers,
-		Cultures:      datas,
-		Others:        others,
-		EqualCultures: equalCultures,
-		EqualOthers:   equalOthers,
+		Headers:  headers,
+		Cultures: datas,
+		Others:   []string(others),
 	})
 	if err != nil {
 		return err
@@ -731,28 +764,18 @@ const culturesTplStr = `// Generated by https://github.com/empirefox/makeplural
 {{ .Headers }}
 package plural
 
-import(
-	"golang.org/x/text/language"
-)
-
 var Info = PluralInfo{
 	Cultures: []Culture{
 		{{- range .Cultures }}
 		{{ template "culture" . }},
 		{{- end }}
 	},
-	Others: []language.Tag{
-		{{- range .Others }}
-		language.MustParse("{{ .String }}"),
-		{{- end }}
-	},
-	{{ if .EqualCultures }} EqualCultures: {{ .EqualCultures | printf "%#v" }}, {{ end }}
-	{{ if .EqualOthers }} EqualOthers: {{ .EqualOthers | printf "%#v" }}, {{ end }}
+	Others: {{ .Others | printf "%#v" }},
 }
 `
 
 const cultureTplStr = `{
-	Name: language.MustParse("{{ .Name.String }}"),
+	Langs: {{ .Langs | printf "%#v" }},
 	{{ range . | symbols }} {{ if .Use }}{{.String}}:{{.String}},{{ end }} {{ end }}
 	{{ if .Cardinal }} Cardinal: {{ template "cases" .Cardinal }}, {{ end }}
 	{{ if .Ordinal }} Ordinal: {{ template "cases" .Ordinal }}, {{ end }}
@@ -805,11 +828,9 @@ func init() {
 }
 
 type culturesTplData struct {
-	Headers       string
-	Cultures      []*plural.Culture
-	Others        []language.Tag
-	EqualCultures []string
-	EqualOthers   []string
+	Headers  string
+	Cultures []*plural.Culture
+	Others   []string
 }
 
 func createPluralsData(dest_filepath string, data *culturesTplData) error {

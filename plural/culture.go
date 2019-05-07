@@ -8,10 +8,7 @@ import (
 
 type PluralInfo struct {
 	Cultures []Culture
-	Others   []language.Tag
-
-	EqualCultures []string
-	EqualOthers   []string
+	Others   []string
 
 	culturesMap map[language.Tag]*Culture
 	othersMap   map[language.Tag]bool
@@ -19,9 +16,11 @@ type PluralInfo struct {
 
 func (pi *PluralInfo) CulturesMap() map[language.Tag]*Culture {
 	if pi.culturesMap == nil {
-		pi.culturesMap = make(map[language.Tag]*Culture, len(pi.Cultures))
+		pi.culturesMap = make(map[language.Tag]*Culture, 256)
 		for i := range pi.Cultures {
-			pi.culturesMap[pi.Cultures[i].Name] = &pi.Cultures[i]
+			for _, lang := range pi.Cultures[i].Langs {
+				pi.culturesMap[language.MustParse(lang)] = &pi.Cultures[i]
+			}
 		}
 	}
 	return pi.culturesMap
@@ -30,15 +29,15 @@ func (pi *PluralInfo) CulturesMap() map[language.Tag]*Culture {
 func (pi *PluralInfo) IsOthers(cultrue language.Tag) bool {
 	if pi.othersMap == nil {
 		pi.othersMap = make(map[language.Tag]bool, len(pi.Others))
-		for _, c := range pi.Others {
-			pi.othersMap[c] = true
+		for _, lang := range pi.Others {
+			pi.othersMap[language.MustParse(lang)] = true
 		}
 	}
 	return pi.othersMap[cultrue]
 }
 
 type Culture struct {
-	Name language.Tag
+	Langs []string
 
 	// Symbols plus P
 	F, I, N, V, T, W, P Symbol
