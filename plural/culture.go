@@ -14,6 +14,34 @@ type PluralInfo struct {
 	othersMap   map[language.Tag]bool
 }
 
+func (pi *PluralInfo) Find(lang language.Tag) (c *Culture, found bool) {
+	c, found = pi.CulturesMap()[lang]
+	if found {
+		return
+	}
+
+	found = pi.IsOthers(lang)
+	if found {
+		return
+	}
+
+	base, confidence := lang.Base()
+	if confidence == language.No {
+		return
+	}
+
+	lang2, err := language.Compose(base)
+	if err != nil {
+		return
+	}
+
+	if lang2 == lang {
+		lang2 = lang.Parent()
+	}
+
+	return pi.Find(lang2)
+}
+
 func (pi *PluralInfo) CulturesMap() map[language.Tag]*Culture {
 	if pi.culturesMap == nil {
 		pi.culturesMap = make(map[language.Tag]*Culture, 256)
