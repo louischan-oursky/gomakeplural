@@ -7,6 +7,8 @@ import (
     "fmt"
     "math"
     "strconv"
+
+	"golang.org/x/text/language"
 )
 
 func mod(x, y float64) float64 {
@@ -34,19 +36,19 @@ func float(v interface{}) float64 {
     return 0.0
 }
 
-var plural_funcs map[string]func(interface{}, bool) string
+var plural_funcs = make(map[language.Tag]func(interface{}, bool) string)
 
 func init() {
-    plural_funcs = make(map[string]func(interface{}, bool) string)
-{{ range $_, $item := .Items }}
-    plural_funcs["{{ $item.Culture }}"] = func(value interface{}, ordinal bool) string {
-{{ $item.Code }}    }
+{{ range .Items }}
+    plural_funcs[language.MustParse("{{ .Culture }}")] = func(value interface{}, ordinal bool) string {
+        {{ .Code -}}
+    }
 {{ end }}}
 
-func GetFunc(name string) (func(interface{}, bool) string, error) {
-    fn, ok := plural_funcs[name]
+func GetFunc(culture language.Tag) (func(interface{}, bool) string, error) {
+    fn, ok := plural_funcs[culture]
     if !ok {
-        return nil, fmt.Errorf("UnknownCulture: `%s`", name)
+        return nil, fmt.Errorf("UnknownCulture: `%s`", culture)
     }
     return fn, nil
 }

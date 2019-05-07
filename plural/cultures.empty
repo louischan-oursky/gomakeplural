@@ -1,7 +1,0 @@
-package plural
-
-import "golang.org/x/text/language"
-
-var Cultures []Culture
-
-var Others []language.Tag

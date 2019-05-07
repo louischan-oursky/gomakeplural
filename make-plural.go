@@ -634,8 +634,22 @@ func createGoFiles(headers string, allPlurals, allOrdinals map[string]map[string
 
 	datas := make([]*plural.Culture, 0, len(cultures))
 	others := make([]language.Tag, 0, len(cultures))
+	culturesMap := make(map[language.Tag]bool, len(cultures))
+	othersMap := make(map[language.Tag]bool, len(cultures))
+	equalCultures := make([]string, 0, len(cultures))
+	equalOthers := make([]string, 0, len(cultures))
 	for _, culture := range cultures {
 		log.Print(culture)
+
+		t := language.MustParse(culture)
+		if culturesMap[t] {
+			equalCultures = append(equalCultures, culture)
+			continue
+		}
+		if othersMap[t] {
+			equalOthers = append(equalOthers, culture)
+			continue
+		}
 
 		plurals := allPlurals[culture]
 
@@ -657,7 +671,6 @@ func createGoFiles(headers string, allPlurals, allOrdinals map[string]map[string
 			}
 		}
 
-		t := language.MustParse(culture)
 		data := plural.Culture{
 			Name:     t,
 			Cardinal: make(plural.Cases, 0, 5),
@@ -673,22 +686,32 @@ func createGoFiles(headers string, allPlurals, allOrdinals map[string]map[string
 		}
 		if data.Cardinal != nil || data.Ordinal != nil {
 			datas = append(datas, &data)
+			culturesMap[t] = true
+			if t.String() != culture {
+				equalCultures = append(equalCultures, culture)
+			}
 		} else {
 			others = append(others, t)
+			othersMap[t] = true
+			if t.String() != culture {
+				equalOthers = append(equalOthers, culture)
+			}
 		}
-		items = append(items, FuncSource{culture, vars, code})
+		items = append(items, FuncSource{t.String(), vars, code})
 
 		log.Println(" \u2713")
 
 		if data.HasTest() {
-			tests = append(tests, NewTestSource(culture, &data))
+			tests = append(tests, NewTestSource(t.String(), &data))
 		}
 	}
 
 	err := createPluralsData("plural/cultures.go", &culturesTplData{
-		Headers:  headers,
-		Cultures: datas,
-		Others:   others,
+		Headers:       headers,
+		Cultures:      datas,
+		Others:        others,
+		EqualCultures: equalCultures,
+		EqualOthers:   equalOthers,
 	})
 	if err != nil {
 		return err
@@ -712,22 +735,25 @@ import(
 	"golang.org/x/text/language"
 )
 
-var Cultures = []Culture{
-	{{- range .Cultures }}
-	{{ template "culture" . }},
-	{{- end }}
-}
-
-var Others = []language.Tag{
-	{{- range .Others }}
-	language.MustParse("{{ .String }}"),
-	{{- end }}
+var Info = PluralInfo{
+	Cultures: []Culture{
+		{{- range .Cultures }}
+		{{ template "culture" . }},
+		{{- end }}
+	},
+	Others: []language.Tag{
+		{{- range .Others }}
+		language.MustParse("{{ .String }}"),
+		{{- end }}
+	},
+	{{ if .EqualCultures }} EqualCultures: {{ .EqualCultures | printf "%#v" }}, {{ end }}
+	{{ if .EqualOthers }} EqualOthers: {{ .EqualOthers | printf "%#v" }}, {{ end }}
 }
 `
 
 const cultureTplStr = `{
 	Name: language.MustParse("{{ .Name.String }}"),
-	{{ range . | symbols }} {{ if . }}{{.String}}:{{.String}},{{ end }} {{ end }}
+	{{ range . | symbols }} {{ if .Use }}{{.String}}:{{.String}},{{ end }} {{ end }}
 	{{ if .Cardinal }} Cardinal: {{ template "cases" .Cardinal }}, {{ end }}
 	{{ if .Ordinal }} Ordinal: {{ template "cases" .Ordinal }}, {{ end }}
 	{{ if .Vars }} Vars: {{ template "vars" .Vars }}, {{ end }}
@@ -779,9 +805,11 @@ func init() {
 }
 
 type culturesTplData struct {
-	Headers  string
-	Cultures []*plural.Culture
-	Others   []language.Tag
+	Headers       string
+	Cultures      []*plural.Culture
+	Others        []language.Tag
+	EqualCultures []string
+	EqualOthers   []string
 }
 
 func createPluralsData(dest_filepath string, data *culturesTplData) error {

@@ -6,6 +6,37 @@ import (
 	"golang.org/x/text/language"
 )
 
+type PluralInfo struct {
+	Cultures []Culture
+	Others   []language.Tag
+
+	EqualCultures []string
+	EqualOthers   []string
+
+	culturesMap map[language.Tag]*Culture
+	othersMap   map[language.Tag]bool
+}
+
+func (pi *PluralInfo) CulturesMap() map[language.Tag]*Culture {
+	if pi.culturesMap == nil {
+		pi.culturesMap = make(map[language.Tag]*Culture, len(pi.Cultures))
+		for i := range pi.Cultures {
+			pi.culturesMap[pi.Cultures[i].Name] = &pi.Cultures[i]
+		}
+	}
+	return pi.culturesMap
+}
+
+func (pi *PluralInfo) IsOthers(cultrue language.Tag) bool {
+	if pi.othersMap == nil {
+		pi.othersMap = make(map[language.Tag]bool, len(pi.Others))
+		for _, c := range pi.Others {
+			pi.othersMap[c] = true
+		}
+	}
+	return pi.othersMap[cultrue]
+}
+
 type Culture struct {
 	Name language.Tag
 

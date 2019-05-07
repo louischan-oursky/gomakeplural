@@ -6,9 +6,11 @@ package plural
 import (
     "fmt"
     "testing"
+
+	"golang.org/x/text/language"
 )
 
-func getPluralFunc(t *testing.T, culture string) func(interface{}, bool) string {
+func getPluralFunc(t *testing.T, culture language.Tag) func(interface{}, bool) string {
     result, err := GetFunc(culture)
     if nil != err {
         t.Errorf("Unexpected error: %s", err.Error())
@@ -25,11 +27,11 @@ func testNamedKey(t *testing.T, fn func(interface{}, bool) string, input interfa
         fmt.Printf("- Got expected result <%s> for `%v`\n", result, input)
     }
 }
-{{ range $_, $item := .Items }}
-func TestPluralFunc_{{ $item.CultureId }}(t *testing.T) {
-    fn := getPluralFunc(t, "{{ $item.Culture }}")
+{{ range .Items }}
+func TestPluralFunc_{{ .CultureId }}(t *testing.T) {
+    fn := getPluralFunc(t, language.MustParse("{{ .Culture }}"))
     if nil != fn {
-{{ $item.Code }}
+        {{ .Code }}
     }
 }
 {{ end }}
