@@ -14,7 +14,35 @@ type PluralInfo struct {
 	othersMap   map[language.Tag]bool
 }
 
-func (pi *PluralInfo) Find(lang language.Tag) (c *Culture, found bool) {
+func (pi *PluralInfo) Validate(langs []string) (parseFailed, findFailed []string, ok bool) {
+	parseFailed = make([]string, 0, len(langs))
+	findFailed = make([]string, 0, len(langs))
+	for _, item := range langs {
+		lang, err := language.Parse(item)
+		if err != nil {
+			parseFailed = append(parseFailed, item)
+			continue
+		}
+		if _, _, ok := pi.Find(lang); !ok {
+			findFailed = append(findFailed, item)
+		}
+	}
+
+	ok = len(parseFailed)+len(findFailed) == 0
+	return
+}
+
+func (pi *PluralInfo) Langs() []string {
+	all := make([]string, 0, 256)
+	for i := range pi.Cultures {
+		all = append(all, pi.Cultures[i].Langs...)
+	}
+	all = append(all, pi.Others...)
+	return all
+}
+
+func (pi *PluralInfo) Find(lang language.Tag) (c *Culture, on language.Tag, found bool) {
+	on = lang
 	c, found = pi.CulturesMap()[lang]
 	if found {
 		return
