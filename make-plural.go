@@ -19,8 +19,9 @@ import (
 
 	"github.com/Masterminds/sprig"
 	"github.com/elliotchance/pie/pie"
-	"github.com/empirefox/makeplural/plural"
 	"golang.org/x/text/language"
+
+	"github.com/louischan-oursky/gomakeplural/plural"
 )
 
 type (
@@ -737,7 +738,7 @@ func createGoFiles(headers string, allPlurals, allOrdinals map[string]map[string
 	for _, data := range datas {
 		data.Langs = []string(pie.Strings(data.Langs).Unique().Sort())
 	}
-	others = others.Unique().Sort().Unselect(func(lang string) bool {
+	others = others.Unique().Sort().FilterNot(func(lang string) bool {
 		return lang == "und"
 	})
 
