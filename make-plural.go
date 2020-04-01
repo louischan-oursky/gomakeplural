@@ -538,12 +538,12 @@ func toVar(expr string, culture *plural.Culture) string {
 		}
 		mod, err := strconv.Atoi(m)
 		if err != nil {
-			log.Fatalf("mod err:\n", expr)
+			log.Fatalf("mod err: %v\n", expr)
 		}
 		v = plural.Var{Symbol: setSymbol(k[0], culture), Mod: mod}
 	} else {
 		if len(expr) != 1 {
-			log.Fatalln("symbol length err:", expr)
+			log.Fatalf("symbol length err: %v\n", expr)
 		}
 		return setSymbol(expr[0], culture).Name()
 	}
@@ -570,7 +570,7 @@ var symbols = map[byte]bool{
 
 func toSymbol(s byte) plural.Symbol {
 	if !symbols[s] {
-		log.Fatalf("toSymbol err: %s, %d\n", s, s)
+		log.Fatalf("toSymbol err: %s\n", string(s))
 	}
 	return plural.Symbol(s)
 }
